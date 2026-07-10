@@ -18,4 +18,7 @@ export const PERSONAL_CONTEXT = `
     Current life context: - I dont have a routine. i go to work and come home then be alone and miss her. i reek of desperation. i have a friend bhanu who is available at one call sometimes not, but most of the time. but i have no motivation, no purpose, no ambition and i feel empty. i dont enjoy doing anything. i want to change that. i want a life outside of her. i am also physically weak, my weight has dropped quite significantly. i have also stopped working out. my eating habits are quite inconsistent.
 
     Work context: - I work at DSEU university as a develepor, i am an intern there, more like a senior intern, everyone there is my junior. i earn 15000rs a month and i am trying to learn deployment. my working hours are 9.30 to 5.30, monday to friday. i want to earn more, a good job actually. i am 21 and i feel like i am wasting my time here.
+
+
+    overall context: - My life revolves around her, i want to change that. i need to be better and i want give that love to myself which i am expecting from others and also improve my anxiety and abandonment issues.
 `;
