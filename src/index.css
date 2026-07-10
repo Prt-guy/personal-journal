@@ -1,0 +1,42 @@
+@import "tailwindcss";
+
+/* Tailwind v4 uses CSS-based config. Opt into class-based dark mode so our
+   ThemeContext toggle (which puts `.dark` on <html>) drives `dark:` variants. */
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* Calm, readable defaults. Serif for long-form writing surfaces is opt-in
+   via the `.prose-journal` helper rather than global, to keep UI text crisp. */
+:root {
+  color-scheme: light;
+}
+:root.dark {
+  color-scheme: dark;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  @apply bg-stone-50 text-stone-800 antialiased;
+}
+.dark body {
+  @apply bg-stone-950 text-stone-200;
+}
+
+/* Comfortable long-form reading/writing measure and rhythm. */
+.font-reading {
+  font-family: ui-serif, Georgia, Cambria, "Times New Roman", serif;
+}
+
+/* Respect users who prefer reduced motion. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
