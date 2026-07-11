@@ -55,12 +55,11 @@ export async function getJournal(id) {
 }
 
 /**
- * Every journal for a user, newest first.
- * Relies on the `userId` index for the filter and $createdAt for ordering.
+ * Every journal in the collection, newest first (shared history — not scoped
+ * to the caller's anonymous session).
  */
-export async function getAllJournals(userId) {
+export async function getAllJournals() {
   const res = await databases.listDocuments(DB, COLLECTION, [
-    Query.equal('userId', userId),
     Query.orderDesc('$createdAt'),
     Query.limit(100),
   ]);

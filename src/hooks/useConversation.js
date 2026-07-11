@@ -39,7 +39,7 @@ export function useConversation(journalId) {
       try {
         const [journalDoc, allJournals] = await Promise.all([
           getJournal(journalId),
-          getAllJournals(userId),
+          getAllJournals(),
         ]);
         if (cancelled) return;
 
