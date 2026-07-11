@@ -26,6 +26,14 @@ body {
   @apply bg-stone-950 text-stone-200;
 }
 
+/* Full-viewport app shell height. dvh tracks the *visible* viewport on mobile
+   (URL bar collapse, on-screen keyboard with interactive-widget=resizes-content);
+   the vh line is the fallback for older browsers. */
+.h-app {
+  height: 100vh;
+  height: 100dvh;
+}
+
 /* Comfortable long-form reading/writing measure and rhythm. */
 .font-reading {
   font-family: ui-serif, Georgia, Cambria, "Times New Roman", serif;
