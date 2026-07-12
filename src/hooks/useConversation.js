@@ -4,13 +4,19 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { getAllJournals, getJournal } from '../services/journalService';
 import {
+  endConversation,
+  getConversationsForJournals,
   getMessages,
   getOrCreateConversation,
   saveMessage,
 } from '../services/chatService';
-import { sendMessage as aiSendMessage, startConversation } from '../services/aiService';
+import {
+  sendMessage as aiSendMessage,
+  startConversation,
+  summarizeConversation,
+} from '../services/aiService';
 import { useSession } from '../context/SessionContext';
-import { ROLE } from '../utils/constants';
+import { CONTEXT_LIMITS, ROLE } from '../utils/constants';
 
 export function useConversation(journalId) {
   const { userId } = useSession();
@@ -22,8 +28,10 @@ export function useConversation(journalId) {
 
   const [loading, setLoading] = useState(true); // initial load of history
   const [sending, setSending] = useState(false); // an AI turn is in flight
+  const [ending, setEnding] = useState(false); // "End chat" summarization in flight
   const [error, setError] = useState(null); // fatal load error (journal missing)
   const [sendError, setSendError] = useState(null); // recoverable send error
+  const [endError, setEndError] = useState(null); // recoverable end-chat error
 
   // Guards the one-time auto-send against StrictMode double-invoke / remounts.
   const autoSentRef = useRef(false);
@@ -44,7 +52,21 @@ export function useConversation(journalId) {
         if (cancelled) return;
 
         setJournal(journalDoc);
-        setPreviousJournals(allJournals.filter((j) => j.$id !== journalId));
+
+        // Cap to what buildContext will actually use, most-recent-first, then
+        // attach each one's conversation summary (if that conversation was
+        // ended) — used in place of raw truncated content for continuity.
+        const filtered = allJournals.filter((j) => j.$id !== journalId);
+        const candidates = filtered.slice(0, CONTEXT_LIMITS.maxPreviousJournals);
+        const conversationsByJournal = await getConversationsForJournals(
+          candidates.map((j) => j.$id)
+        );
+        const withSummaries = candidates.map((j) => {
+          const convo = conversationsByJournal.get(j.$id);
+          return convo?.ended ? { ...j, summary: convo.summary } : j;
+        });
+        if (cancelled) return;
+        setPreviousJournals(withSummaries);
 
         const convo = await getOrCreateConversation(journalId, userId);
         if (cancelled) return;
@@ -67,7 +89,7 @@ export function useConversation(journalId) {
 
   // ── Auto-send the journal once, only if the conversation is empty ─────────
   useEffect(() => {
-    if (loading || !conversation || !journal) return;
+    if (loading || !conversation || !journal || conversation.ended) return;
     if (messages.length > 0) return; // history already exists
     if (autoSentRef.current) return; // already auto-sent this mount
     autoSentRef.current = true;
@@ -95,7 +117,7 @@ export function useConversation(journalId) {
   const sendUserMessage = useCallback(
     async (text) => {
       const trimmed = text.trim();
-      if (!trimmed || sending || !conversation) return;
+      if (!trimmed || sending || !conversation || conversation.ended) return;
 
       setSendError(null);
       setSending(true);
@@ -142,14 +164,38 @@ export function useConversation(journalId) {
     [sending, conversation, messages, journal, previousJournals, userId]
   );
 
+  // ── End the chat: summarize, persist, and lock the conversation ───────────
+  const endChat = useCallback(async () => {
+    if (ending || sending || !conversation || conversation.ended || messages.length === 0) {
+      return;
+    }
+
+    setEnding(true);
+    setEndError(null);
+    try {
+      const summary = await summarizeConversation({ currentJournal: journal, messages });
+      const updated = await endConversation(conversation.$id, summary);
+      setConversation(updated);
+    } catch (err) {
+      setEndError(err);
+    } finally {
+      setEnding(false);
+    }
+  }, [ending, sending, conversation, messages, journal]);
+
   return {
     journal,
+    conversation,
     messages,
     loading,
     sending,
+    ending,
     error,
     sendError,
+    endError,
     sendUserMessage,
+    endChat,
     clearSendError: () => setSendError(null),
+    clearEndError: () => setEndError(null),
   };
 }

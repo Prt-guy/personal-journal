@@ -27,6 +27,9 @@ export const GEMINI = {
   // gemini-flash-latest tracks Google's current Flash model; concrete versioned
   // names like gemini-2.5-flash can be "not available to new users" for fresh keys.
   model: import.meta.env.VITE_GEMINI_MODEL || 'gemini-flash-latest',
+  // Hard backstop (~350 words) so a reply can never run away token-wise, even if
+  // the model ignores the "keep it short" system instruction on a given turn.
+  maxOutputTokens: 500,
 };
 
 // Message roles — kept as constants so the enum value is defined in exactly one place.
@@ -55,4 +58,7 @@ export const CONTEXT_LIMITS = {
   maxConversationMessages: 20,
   // Max characters kept from your personal context (src/utils/aiContext.js).
   maxPersonalContextChars: 2000,
+  // Max characters kept from a stored conversation summary (see "End chat") when
+  // it's used in place of a previous journal's raw truncated content.
+  maxSummaryChars: 400,
 };

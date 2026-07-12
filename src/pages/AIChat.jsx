@@ -12,6 +12,7 @@ import ChatInput from '../components/ChatInput';
 import Loader from '../components/Loader';
 import EmptyState from '../components/EmptyState';
 import Button from '../components/Button';
+import Modal from '../components/Modal';
 import { displayTitle } from '../utils/format';
 
 const NEAR_BOTTOM_PX = 80;
@@ -27,19 +28,25 @@ export default function AIChat() {
   const navigate = useNavigate();
   const {
     journal,
+    conversation,
     messages,
     loading,
     sending,
+    ending,
     error,
     sendError,
+    endError,
     sendUserMessage,
+    endChat,
     clearSendError,
+    clearEndError,
   } = useConversation(journalId);
 
   const scrollRef = useRef(null);
   const stickToBottomRef = useRef(true); // follow new messages?
   const didInitialScrollRef = useRef(false);
   const [showJump, setShowJump] = useState(false);
+  const [confirmEnd, setConfirmEnd] = useState(false);
 
   const scrollToBottom = useCallback((behavior) => {
     const el = scrollRef.current;
@@ -115,6 +122,17 @@ export default function AIChat() {
               {displayTitle(journal.title)}
             </h1>
           </div>
+          {!conversation?.ended && (
+            <Button
+              variant="ghost"
+              size="md"
+              className="shrink-0"
+              disabled={messages.length === 0 || sending || ending}
+              onClick={() => setConfirmEnd(true)}
+            >
+              End chat
+            </Button>
+          )}
           <Button
             variant="ghost"
             size="md"
@@ -162,6 +180,17 @@ export default function AIChat() {
                 </Button>
               </div>
             )}
+
+            {endError && (
+              <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-red-200/70 bg-red-50 px-4 py-3 dark:border-red-900/50 dark:bg-red-950/40">
+                <p className="text-sm text-red-700 dark:text-red-300">
+                  Couldn't summarize this conversation. It's still open — try again.
+                </p>
+                <Button variant="secondary" size="md" onClick={clearEndError}>
+                  Dismiss
+                </Button>
+              </div>
+            )}
           </div>
         </div>
 
@@ -186,12 +215,44 @@ export default function AIChat() {
         )}
       </div>
 
-      {/* Pinned composer */}
-      <ChatInput
-        onSend={sendUserMessage}
-        sending={sending}
-        initialValue={sendError?.text || ''}
-      />
+      {/* Pinned composer, or a closed notice once the chat has been ended. */}
+      {conversation?.ended ? (
+        <div className="shrink-0 border-t border-stone-200/70 px-4 py-4 text-center text-sm text-stone-400 dark:border-stone-800/70 dark:text-stone-500">
+          This conversation was summarized and closed.
+        </div>
+      ) : (
+        <ChatInput
+          onSend={sendUserMessage}
+          sending={sending}
+          initialValue={sendError?.text || ''}
+        />
+      )}
+
+      <Modal
+        open={confirmEnd}
+        onClose={() => !ending && setConfirmEnd(false)}
+        title="End this conversation?"
+        footer={
+          <>
+            <Button variant="ghost" onClick={() => setConfirmEnd(false)} disabled={ending}>
+              Cancel
+            </Button>
+            <Button
+              variant="danger"
+              disabled={ending}
+              onClick={async () => {
+                await endChat();
+                setConfirmEnd(false);
+              }}
+            >
+              {ending ? 'Summarizing…' : 'End chat'}
+            </Button>
+          </>
+        }
+      >
+        The AI will write a short summary of this conversation for future context, then this
+        thread will be locked — you won't be able to send more messages here.
+      </Modal>
     </div>
   );
 }

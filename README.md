@@ -46,9 +46,13 @@ and displays by the system ones).
 
 **Journals** — `userId` (string, indexed), `title` (string), `content` (string, large).
 
-**Conversations** — `journalId` (string, indexed), `userId` (string, indexed).
+**Conversations** — `journalId` (string, indexed), `userId` (string, indexed),
+`summary` (string, ~2000, optional), `ended` (boolean, default `false`).
 Add a **unique index on `journalId`** to guarantee one conversation per journal
-(the ultimate guard against duplicate conversations).
+(the ultimate guard against duplicate conversations). `summary` is written once
+the user presses "End chat" and is used in place of a journal's raw truncated
+content when it's referenced from a *different* journal's conversation; `ended`
+locks that conversation from further messages.
 
 **Messages** — `conversationId` (string, indexed), `role` (enum: `user`|`assistant`),
 `content` (string, large). Ordered by `$createdAt`.

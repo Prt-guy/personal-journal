@@ -87,3 +87,26 @@ export async function getMessages(conversationId) {
   ]);
   return res.documents;
 }
+
+/**
+ * Save a short AI-written summary and lock the conversation from further
+ * messages ("End chat"). The summary is what other journals' conversations
+ * see instead of this journal's raw truncated content — see buildContext.
+ */
+export async function endConversation(conversationId, summary) {
+  return databases.updateDocument(DB, CONVERSATIONS, conversationId, {
+    summary,
+    ended: true,
+  });
+}
+
+/** Conversations for a batch of journal ids, keyed by journalId. Used to attach
+ * each previous journal's summary (if it has one) when assembling AI context. */
+export async function getConversationsForJournals(journalIds) {
+  if (journalIds.length === 0) return new Map();
+  const res = await databases.listDocuments(DB, CONVERSATIONS, [
+    Query.equal('journalId', journalIds),
+    Query.limit(journalIds.length),
+  ]);
+  return new Map(res.documents.map((c) => [c.journalId, c]));
+}

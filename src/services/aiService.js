@@ -59,8 +59,14 @@ export function buildContext({ currentJournal, previousJournals = [], messages =
     .slice(0, CONTEXT_LIMITS.maxPreviousJournals)
     .map((j) => ({
       title: j.title ?? '',
-      content: truncate(j.content ?? '', CONTEXT_LIMITS.maxPreviousJournalChars),
+      // A journal whose conversation was ended carries a short AI-written summary
+      // (see endConversation) — denser and cheaper than a raw truncation, so it
+      // takes priority. Otherwise fall back to the raw truncated content.
+      content: j.summary
+        ? truncate(j.summary, CONTEXT_LIMITS.maxSummaryChars)
+        : truncate(j.content ?? '', CONTEXT_LIMITS.maxPreviousJournalChars),
       createdAt: j.$createdAt,
+      summarized: Boolean(j.summary),
     }));
 
   // Keep only the most recent turns verbatim; older turns are dropped here and
@@ -86,8 +92,12 @@ export function buildContext({ currentJournal, previousJournals = [], messages =
 function flattenToPrompt(context) {
   const parts = [];
   parts.push(
-    'You are a warm, thoughtful journaling companion. Reflect on the writing, ' +
-      'ask gentle questions, and draw continuity from earlier entries when relevant.'
+    'You are a warm, thoughtful journaling companion. Reflect on the writing and ' +
+      'draw continuity from earlier entries when relevant. Match your reply length ' +
+      "to what was written — a one-line entry gets a short reply, not an essay. " +
+      'Name the emotional essence of what you sense rather than recapping their ' +
+      'words back to them. No padding, no generic affirmations — one focused ' +
+      'thought or question, nothing more.'
   );
 
   if (context.profile) {
@@ -102,7 +112,8 @@ function flattenToPrompt(context) {
   if (context.previousJournals.length) {
     parts.push('\n=== PREVIOUS JOURNALS (most recent first, possibly truncated) ===');
     context.previousJournals.forEach((j, i) => {
-      parts.push(`\n[${i + 1}] ${j.title || '(untitled)'} — ${j.createdAt ?? ''}`);
+      const label = j.summarized ? 'summary' : 'excerpt';
+      parts.push(`\n[${i + 1}] ${j.title || '(untitled)'} — ${j.createdAt ?? ''} (${label})`);
       parts.push(j.content || '(empty)');
     });
   }
@@ -129,9 +140,13 @@ function parseReply(data) {
 // current journal opens the turn-by-turn `contents`, followed by the conversation.
 function buildGeminiRequest(context) {
   const systemParts = [
-    'You are a warm, thoughtful journaling companion. Reflect on the writing, ' +
-      'ask gentle, open questions, and draw continuity from earlier entries when ' +
-      'relevant. Keep replies concise and human — never clinical.',
+    'You are a warm, thoughtful journaling companion. Reflect on the writing and ' +
+      'draw continuity from earlier entries when relevant — never clinical. ' +
+      'Match your reply length to what was written: a one-line entry gets a ' +
+      'sentence or two back, not an essay; only a long, detailed entry earns a ' +
+      'longer reply. Prioritize naming the emotional essence of what you sense ' +
+      "over recapping their words back to them. No padding, no generic " +
+      'affirmations, no multi-part responses — one focused thought or question.',
   ];
 
   // Standing life context about the writer — steer responses to be personal.
@@ -149,8 +164,9 @@ function buildGeminiRequest(context) {
         '(most recent first, possibly truncated). Use them only as background memory:'
     );
     context.previousJournals.forEach((j, i) => {
+      const label = j.summarized ? 'summary' : 'excerpt';
       systemParts.push(
-        `\n[${i + 1}] ${j.title || '(untitled)'} — ${j.createdAt ?? ''}\n${j.content || '(empty)'}`
+        `\n[${i + 1}] ${j.title || '(untitled)'} — ${j.createdAt ?? ''} (${label})\n${j.content || '(empty)'}`
       );
     });
   }
@@ -181,6 +197,10 @@ function buildGeminiRequest(context) {
   return {
     system_instruction: { parts: [{ text: systemParts.join('\n') }] },
     contents,
+    // Hard backstop on reply length — see GEMINI.maxOutputTokens. The generic
+    // AI_API_URL proxy path isn't ours to cap this way; prompt wording is the
+    // only lever there.
+    generationConfig: { maxOutputTokens: GEMINI.maxOutputTokens },
   };
 }
 
@@ -261,6 +281,67 @@ function placeholderReply({ context, latestUserMessage }) {
     `[AI placeholder response] You said: “${latestUserMessage}”. ` +
     `That's worth sitting with — what do you think is underneath it?`
   );
+}
+
+// ── Conversation summarization ("End chat") ─────────────────────────────────
+// A distinct, smaller request than a reply: asks for short background notes on
+// the conversation instead of something addressed to the writer. Uses the full
+// message list the caller passes in (not the outgoing-context cap in
+// buildContext) — this runs once per conversation, not once per message.
+const SUMMARY_MAX_OUTPUT_TOKENS = 200;
+
+function summaryPrompt({ currentJournal, transcript }) {
+  return (
+    'Summarize the emotional essence and key themes of the conversation below in ' +
+    '2-4 sentences, under 400 characters. Focus on feelings and turning points, ' +
+    'not a blow-by-blow recap. Write it as background notes for your own future ' +
+    'reference — not addressed to the writer.\n\n' +
+    `Journal title: ${currentJournal?.title || '(untitled)'}\n\n` +
+    `=== CONVERSATION ===\n${transcript}`
+  );
+}
+
+async function callGeminiSummary(prompt) {
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI.model}:generateContent`;
+  const body = {
+    contents: [{ role: 'user', parts: [{ text: prompt }] }],
+    generationConfig: { maxOutputTokens: SUMMARY_MAX_OUTPUT_TOKENS },
+  };
+  const { data } = await axios.post(url, body, {
+    headers: { 'Content-Type': 'application/json', 'x-goog-api-key': GEMINI.apiKey },
+  });
+  return parseGeminiReply(data);
+}
+
+// Deterministic placeholder so "End chat" works with no provider configured too.
+function placeholderSummary({ currentJournal, messages }) {
+  const title = currentJournal?.title || 'this entry';
+  return `[Placeholder summary] Reflected on "${title}" across ${messages.length} messages.`;
+}
+
+/** Summarize a finished conversation and return the summary text (unpersisted). */
+export async function summarizeConversation({ currentJournal, messages }) {
+  const transcript = messages.map((m) => `${m.role}: ${m.content}`).join('\n');
+
+  let summary;
+  if (GEMINI.apiKey) {
+    summary = await callGeminiSummary(summaryPrompt({ currentJournal, transcript }));
+  } else if (AI_API_URL) {
+    const { data } = await axios.post(
+      AI_API_URL,
+      {
+        context: { currentJournal, transcript },
+        prompt: summaryPrompt({ currentJournal, transcript }),
+        latestUserMessage: '',
+      },
+      { headers: { 'Content-Type': 'application/json' } }
+    );
+    summary = parseReply(data);
+  } else {
+    summary = placeholderSummary({ currentJournal, messages });
+  }
+
+  return truncate(summary.trim(), CONTEXT_LIMITS.maxSummaryChars);
 }
 
 /**
